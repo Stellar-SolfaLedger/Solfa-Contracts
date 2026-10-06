@@ -5,9 +5,9 @@ pub mod types;
 
 use errors::ContractError;
 use events::Events;
-use types::{DataKey, Plan};
+use types::{DataKey, Plan, Subscription};
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
 
 #[contract]
 pub struct SolfaPayments;
@@ -240,5 +240,68 @@ impl SolfaPayments {
     /// Returns the price per single credit in terms of a specific token.
     pub fn get_credit_price(env: Env, token: Address) -> Option<i128> {
         env.storage().instance().get(&DataKey::CreditPrice(token))
+    }
+
+    /// Subscribes a user to a plan paying with the designated token asset.
+    /// Requires user authorization.
+    pub fn subscribe(
+        env: Env,
+        user: Address,
+        plan_id: u32,
+        token: Address,
+    ) -> Result<(), ContractError> {
+        Self::require_not_paused(&env)?;
+        user.require_auth();
+
+        let plan = Self::get_plan(env.clone(), plan_id).ok_or(ContractError::PlanNotFound)?;
+        if !plan.active {
+            return Err(ContractError::PlanInactive);
+        }
+
+        let price = Self::get_plan_price(env.clone(), plan_id, token.clone())
+            .ok_or(ContractError::PriceNotSet)?;
+
+        let treasury = Self::get_treasury(&env)?;
+
+        // Transfer payment from user to treasury
+        token::Client::new(&env, &token).transfer(&user, &treasury, &price);
+
+        // Expiry calculation: extends if active, starts now if expired/new
+        let now = env.ledger().timestamp();
+        let existing_sub: Option<Subscription> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Subscription(user.clone()));
+
+        let base_time = match existing_sub {
+            Some(sub) if sub.expires_at > now => sub.expires_at,
+            _ => now,
+        };
+
+        let new_expiry = base_time + plan.duration_secs;
+        let subscription = Subscription {
+            plan_id,
+            expires_at: new_expiry,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::Subscription(user.clone()), &subscription);
+
+        // If plan is not unlimited, grant the plan's bundled credits
+        if !plan.unlimited && plan.credits > 0 {
+            let current_credits: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::Credits(user.clone()))
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &DataKey::Credits(user.clone()),
+                &(current_credits + plan.credits),
+            );
+        }
+
+        Events::emit_subscribed(&env, &user, plan_id, &token, price, new_expiry);
+
+        Ok(())
     }
 }

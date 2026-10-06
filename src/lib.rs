@@ -7,7 +7,7 @@ use errors::ContractError;
 use events::Events;
 use types::{DataKey, Plan, Subscription};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
 
 #[contract]
 pub struct SolfaPayments;
@@ -50,6 +50,22 @@ impl SolfaPayments {
             return Err(ContractError::ContractPaused);
         }
         Ok(())
+    }
+
+    pub(crate) fn is_unlimited_active(env: &Env, user: &Address) -> bool {
+        let sub: Option<Subscription> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Subscription(user.clone()));
+        if let Some(sub) = sub {
+            let now = env.ledger().timestamp();
+            if sub.expires_at > now {
+                if let Some(plan) = Self::get_plan(env.clone(), sub.plan_id) {
+                    return plan.active && plan.unlimited;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -345,6 +361,41 @@ impl SolfaPayments {
             .set(&DataKey::Credits(user.clone()), &new_credits);
 
         Events::emit_credits_purchased(&env, &user, &token, count, total_amount);
+
+        Ok(())
+    }
+
+    /// Consumes one transcription credit for the user on successful transcription.
+    /// Unlimited plan subscribers bypass credit deduction.
+    /// Requires operator authorization.
+    pub fn consume_credit(
+        env: Env,
+        user: Address,
+        job_id: String,
+    ) -> Result<(), ContractError> {
+        Self::require_not_paused(&env)?;
+
+        let operator = Self::get_operator(&env)?;
+        operator.require_auth();
+
+        // If user has an active unlimited subscription, credits are unmetered
+        if !Self::is_unlimited_active(&env, &user) {
+            let current_credits: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::Credits(user.clone()))
+                .unwrap_or(0);
+
+            if current_credits == 0 {
+                return Err(ContractError::InsufficientCredits);
+            }
+
+            env.storage()
+                .instance()
+                .set(&DataKey::Credits(user.clone()), &(current_credits - 1));
+        }
+
+        Events::emit_credit_consumed(&env, &user, &job_id);
 
         Ok(())
     }

@@ -233,4 +233,172 @@ pub mod test {
             .try_set_plan_price(&1, &fixture.xlm_token, &0);
         assert_eq!(err2.err(), Some(Ok(ContractError::InvalidAmount)));
     }
+
+    #[test]
+    fn test_subscribe_with_xlm_and_credit_grant() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &true);
+        fixture
+            .client
+            .set_plan_price(&1, &fixture.xlm_token, &100_000_000);
+
+        let initial_user_bal = fixture.xlm_client.balance(&fixture.user);
+        let initial_tres_bal = fixture.xlm_client.balance(&fixture.treasury);
+
+        fixture
+            .client
+            .subscribe(&fixture.user, &1, &fixture.xlm_token);
+
+        assert_eq!(
+            fixture.xlm_client.balance(&fixture.user),
+            initial_user_bal - 100_000_000
+        );
+        assert_eq!(
+            fixture.xlm_client.balance(&fixture.treasury),
+            initial_tres_bal + 100_000_000
+        );
+
+        // Credits allocated
+        assert_eq!(fixture.client.get_credits(&fixture.user), 20);
+
+        // Subscription record created
+        let sub = fixture.client.get_subscription(&fixture.user).unwrap();
+        assert_eq!(sub.plan_id, 1);
+        let now = fixture.env.ledger().timestamp();
+        assert_eq!(sub.expires_at, now + 2592000);
+    }
+
+    #[test]
+    fn test_renewal_extends_from_current_expiry() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &true);
+        fixture
+            .client
+            .set_plan_price(&1, &fixture.xlm_token, &100_000_000);
+
+        // First subscription at t=1000
+        fixture.env.ledger().set_timestamp(1000);
+        fixture
+            .client
+            .subscribe(&fixture.user, &1, &fixture.xlm_token);
+        let first_expiry = fixture
+            .client
+            .get_subscription(&fixture.user)
+            .unwrap()
+            .expires_at;
+        assert_eq!(first_expiry, 1000 + 2592000);
+
+        // Renew at t=50000 (well before first expiry)
+        fixture.env.ledger().set_timestamp(50000);
+        fixture
+            .client
+            .subscribe(&fixture.user, &1, &fixture.xlm_token);
+        let second_expiry = fixture
+            .client
+            .get_subscription(&fixture.user)
+            .unwrap()
+            .expires_at;
+
+        // Must extend from previous expiry!
+        assert_eq!(second_expiry, first_expiry + 2592000);
+        // Credits accumulated
+        assert_eq!(fixture.client.get_credits(&fixture.user), 40);
+    }
+
+    #[test]
+    fn test_expired_subscription_renewal_starts_from_now() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &true);
+        fixture
+            .client
+            .set_plan_price(&1, &fixture.xlm_token, &100_000_000);
+
+        fixture.env.ledger().set_timestamp(1000);
+        fixture
+            .client
+            .subscribe(&fixture.user, &1, &fixture.xlm_token);
+
+        // Advance ledger way past expiry
+        fixture.env.ledger().set_timestamp(10_000_000);
+        fixture
+            .client
+            .subscribe(&fixture.user, &1, &fixture.xlm_token);
+
+        let sub = fixture.client.get_subscription(&fixture.user).unwrap();
+        // Starts fresh from current timestamp
+        assert_eq!(sub.expires_at, 10_000_000 + 2592000);
+    }
+
+    #[test]
+    fn test_buy_credits_math_and_balance() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_credit_price(&fixture.xlm_token, &10_000_000);
+
+        let user_start = fixture.xlm_client.balance(&fixture.user);
+        let tres_start = fixture.xlm_client.balance(&fixture.treasury);
+
+        // Buy 5 credits
+        fixture
+            .client
+            .buy_credits(&fixture.user, &fixture.xlm_token, &5);
+
+        assert_eq!(
+            fixture.xlm_client.balance(&fixture.user),
+            user_start - 50_000_000
+        );
+        assert_eq!(
+            fixture.xlm_client.balance(&fixture.treasury),
+            tres_start + 50_000_000
+        );
+        assert_eq!(fixture.client.get_credits(&fixture.user), 5);
+    }
+
+    #[test]
+    fn test_unaccepted_token_rejected() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &true);
+
+        // Random unpriced asset
+        let unpriced_token = Address::generate(&fixture.env);
+
+        let sub_res = fixture
+            .client
+            .try_subscribe(&fixture.user, &1, &unpriced_token);
+        assert_eq!(sub_res.err(), Some(Ok(ContractError::PriceNotSet)));
+
+        let buy_res = fixture
+            .client
+            .try_buy_credits(&fixture.user, &unpriced_token, &1);
+        assert_eq!(buy_res.err(), Some(Ok(ContractError::PriceNotSet)));
+    }
 }

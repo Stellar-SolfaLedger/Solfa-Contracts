@@ -5,9 +5,9 @@ pub mod types;
 
 use errors::ContractError;
 use events::Events;
-use types::DataKey;
+use types::{DataKey, Plan};
 
-use soroban_sdk::{contract, contractimpl, Address, Env};
+use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
 
 #[contract]
 pub struct SolfaPayments;
@@ -110,5 +110,61 @@ impl SolfaPayments {
             .instance()
             .get(&DataKey::Paused)
             .unwrap_or(false)
+    }
+
+    /// Configures or updates a subscription plan.
+    /// Requires admin authorization.
+    pub fn set_plan(
+        env: Env,
+        plan_id: u32,
+        duration_secs: u64,
+        credits: u32,
+        unlimited: bool,
+        active: bool,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+
+        if duration_secs == 0 {
+            return Err(ContractError::InvalidDuration);
+        }
+
+        let plan = Plan {
+            duration_secs,
+            credits,
+            unlimited,
+            active,
+        };
+
+        env.storage().instance().set(&DataKey::Plan(plan_id), &plan);
+
+        // Maintain list of all plan IDs
+        let mut plans: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::PlanList)
+            .unwrap_or(Vec::new(&env));
+
+        let mut exists = false;
+        for i in 0..plans.len() {
+            if plans.get(i).unwrap() == plan_id {
+                exists = true;
+                break;
+            }
+        }
+        if !exists {
+            plans.push_back(plan_id);
+            env.storage().instance().set(&DataKey::PlanList, &plans);
+        }
+
+        Events::emit_plan_updated(
+            &env,
+            plan_id,
+            duration_secs,
+            credits,
+            unlimited,
+            active,
+        );
+
+        Ok(())
     }
 }

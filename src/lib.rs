@@ -3,6 +3,9 @@ pub mod errors;
 pub mod events;
 pub mod types;
 
+#[cfg(test)]
+mod test;
+
 use errors::ContractError;
 use events::Events;
 use types::{DataKey, Plan, Subscription};

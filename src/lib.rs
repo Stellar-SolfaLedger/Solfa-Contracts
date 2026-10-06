@@ -236,4 +236,9 @@ impl SolfaPayments {
 
         Ok(())
     }
+
+    /// Returns the price per single credit in terms of a specific token.
+    pub fn get_credit_price(env: Env, token: Address) -> Option<i128> {
+        env.storage().instance().get(&DataKey::CreditPrice(token))
+    }
 }

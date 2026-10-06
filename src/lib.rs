@@ -12,6 +12,47 @@ use soroban_sdk::{contract, contractimpl, Address, Env};
 #[contract]
 pub struct SolfaPayments;
 
+impl SolfaPayments {
+    pub(crate) fn get_admin(env: &Env) -> Result<Address, ContractError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::NotInitialized)
+    }
+
+    pub(crate) fn require_admin(env: &Env) -> Result<Address, ContractError> {
+        let admin = Self::get_admin(env)?;
+        admin.require_auth();
+        Ok(admin)
+    }
+
+    pub(crate) fn get_operator(env: &Env) -> Result<Address, ContractError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Operator)
+            .ok_or(ContractError::NotInitialized)
+    }
+
+    pub(crate) fn get_treasury(env: &Env) -> Result<Address, ContractError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .ok_or(ContractError::NotInitialized)
+    }
+
+    pub(crate) fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            return Err(ContractError::ContractPaused);
+        }
+        Ok(())
+    }
+}
+
 #[contractimpl]
 impl SolfaPayments {
     /// Initialises contract with admin, treasury, and operator addresses.

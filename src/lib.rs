@@ -76,4 +76,13 @@ impl SolfaPayments {
 
         Ok(())
     }
+
+    /// Updates the operator address (backend transcription worker key).
+    /// Requires admin authorization.
+    pub fn set_operator(env: Env, new_operator: Address) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Operator, &new_operator);
+        Events::emit_operator_updated(&env, &new_operator);
+        Ok(())
+    }
 }

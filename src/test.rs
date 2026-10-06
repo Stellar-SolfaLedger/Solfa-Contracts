@@ -509,4 +509,87 @@ pub mod test {
         fixture.env.ledger().set_timestamp(10_000_000);
         assert_eq!(fixture.client.can_transcribe(&fixture.user), false);
     }
+
+    #[test]
+    fn test_pause_enforces_circuit_breaker() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &true);
+        fixture
+            .client
+            .set_plan_price(&1, &fixture.xlm_token, &100_000_000);
+        fixture
+            .client
+            .set_credit_price(&fixture.xlm_token, &10_000_000);
+
+        // Pause contract
+        fixture.client.set_pause(&true);
+
+        // Subscribe rejected
+        let sub_err = fixture
+            .client
+            .try_subscribe(&fixture.user, &1, &fixture.xlm_token);
+        assert_eq!(sub_err.err(), Some(Ok(ContractError::ContractPaused)));
+
+        // Buy credits rejected
+        let buy_err = fixture
+            .client
+            .try_buy_credits(&fixture.user, &fixture.xlm_token, &1);
+        assert_eq!(buy_err.err(), Some(Ok(ContractError::ContractPaused)));
+
+        // Consume credit rejected
+        let job_id = String::from_str(&fixture.env, "job-pause");
+        let consume_err = fixture
+            .client
+            .try_consume_credit(&fixture.user, &job_id);
+        assert_eq!(consume_err.err(), Some(Ok(ContractError::ContractPaused)));
+
+        // Unpause: operations resume
+        fixture.client.set_pause(&false);
+        assert!(fixture
+            .client
+            .try_subscribe(&fixture.user, &1, &fixture.xlm_token)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_admin_refund_workflow() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        // Mint XLM directly to treasury for refund pool
+        fixture
+            .xlm_admin_client
+            .mint(&fixture.treasury, &500_000_000);
+
+        let user_start = fixture.xlm_client.balance(&fixture.user);
+        let tres_start = fixture.xlm_client.balance(&fixture.treasury);
+
+        let refund_res = fixture
+            .client
+            .try_refund(&fixture.user, &fixture.xlm_token, &50_000_000);
+        assert!(refund_res.is_ok());
+
+        assert_eq!(
+            fixture.xlm_client.balance(&fixture.user),
+            user_start + 50_000_000
+        );
+        assert_eq!(
+            fixture.xlm_client.balance(&fixture.treasury),
+            tres_start - 50_000_000
+        );
+
+        // Zero amount fails
+        let invalid_refund = fixture
+            .client
+            .try_refund(&fixture.user, &fixture.xlm_token, &0);
+        assert_eq!(invalid_refund.err(), Some(Ok(ContractError::InvalidAmount)));
+    }
 }

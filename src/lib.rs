@@ -172,4 +172,12 @@ impl SolfaPayments {
     pub fn get_plan(env: Env, plan_id: u32) -> Option<Plan> {
         env.storage().instance().get(&DataKey::Plan(plan_id))
     }
+
+    /// Returns all registered plan IDs.
+    pub fn get_plans(env: Env) -> Vec<u32> {
+        env.storage()
+            .instance()
+            .get(&DataKey::PlanList)
+            .unwrap_or(Vec::new(&env))
+    }
 }

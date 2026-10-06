@@ -304,4 +304,48 @@ impl SolfaPayments {
 
         Ok(())
     }
+
+    /// Buys transcription credits in bulk paying with an accepted token asset.
+    /// Requires user authorization.
+    pub fn buy_credits(
+        env: Env,
+        user: Address,
+        token: Address,
+        count: u32,
+    ) -> Result<(), ContractError> {
+        Self::require_not_paused(&env)?;
+        user.require_auth();
+
+        if count == 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let unit_price = Self::get_credit_price(env.clone(), token.clone())
+            .ok_or(ContractError::PriceNotSet)?;
+
+        let total_amount = unit_price
+            .checked_mul(count as i128)
+            .ok_or(ContractError::InvalidAmount)?;
+
+        let treasury = Self::get_treasury(&env)?;
+
+        // Transfer token payment from user to treasury
+        token::Client::new(&env, &token).transfer(&user, &treasury, &total_amount);
+
+        // Increment user's credit balance
+        let current_credits: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Credits(user.clone()))
+            .unwrap_or(0);
+
+        let new_credits = current_credits + count;
+        env.storage()
+            .instance()
+            .set(&DataKey::Credits(user.clone()), &new_credits);
+
+        Events::emit_credits_purchased(&env, &user, &token, count, total_amount);
+
+        Ok(())
+    }
 }

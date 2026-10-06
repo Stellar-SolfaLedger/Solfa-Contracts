@@ -214,4 +214,26 @@ impl SolfaPayments {
             .instance()
             .get(&DataKey::PlanPrice(plan_id, token))
     }
+
+    /// Sets the price per transcription credit for a specific token asset.
+    /// Requires admin authorization.
+    pub fn set_credit_price(
+        env: Env,
+        token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CreditPrice(token.clone()), &amount);
+
+        Events::emit_credit_price_set(&env, &token, amount);
+
+        Ok(())
+    }
 }

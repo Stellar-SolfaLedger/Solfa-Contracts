@@ -31,7 +31,8 @@ Soroban (Rust) smart contract handling subscription management and pay-per-use c
 | `set_plan` | `plan_id: u32, duration_secs: u64, credits: u32, unlimited: bool, active: bool` | Configures plan tier. Requires admin auth. |
 | `set_plan_price` | `plan_id: u32, token: Address, amount: i128` | Sets token price (in 7-decimal stroops) for a plan. |
 | `set_credit_price`| `token: Address, amount: i128` | Sets token price per single credit. |
-| `refund` | `to: Address, token: Address, amount: i128` | Issues token refund from treasury to user. |
+| `refund` | `to: Address, token: Address, amount: i128` | Issues token refund from treasury to user. Requires BOTH Admin AND Treasury authorization. |
+| `upgrade` | `new_wasm_hash: BytesN<32>` | Upgrades contract Wasm executable code preserving all persistent state. Requires admin auth. |
 
 ### User Payment Methods
 | Function | Parameters | Description |
@@ -44,8 +45,8 @@ Soroban (Rust) smart contract handling subscription management and pay-per-use c
 |---|---|---|---|
 | `consume_credit` | `user: Address, job_id: String` | `Result<(), ContractError>` | Decrements 1 credit if not unlimited. Requires operator auth. |
 | `can_transcribe` | `user: Address` | `bool` | Returns `true` if user has active unlimited sub or credits > 0. |
-| `get_subscription`| `user: Address` | `Option<Subscription>` | Returns active or past subscription details. |
-| `get_credits` | `user: Address` | `u32` | Returns user's credit balance. |
+| `get_subscription`| `user: Address` | `Option<Subscription>` | Returns active or past subscription details from persistent storage. |
+| `get_credits` | `user: Address` | `u32` | Returns user's credit balance from persistent storage. |
 | `get_plan` | `plan_id: u32` | `Option<Plan>` | Returns plan details. |
 | `get_plans` | `()` | `Vec<u32>` | Returns all registered plan IDs for discovery. |
 | `get_plan_price` | `plan_id: u32, token: Address` | `Option<i128>` | Returns price for plan in token. |
@@ -71,18 +72,19 @@ All events are emitted through Soroban's event system:
 | `buy_cred` | `user: Address` | `(token: Address, count: u32, amount: i128)` | Emitted when credits are purchased |
 | `use_cred` | `user: Address` | `job_id: String` | Emitted when a credit is consumed |
 | `refund` | `to: Address, token: Address` | `amount: i128` | Emitted on admin refund execution |
+| `upgrade` | `()` | `new_wasm_hash: BytesN<32>` | Emitted when contract Wasm code is upgraded |
 
 ---
 
 ## Unit Testing
 
-Run the full unit test suite covering single-init, auth restrictions, renewals, mathematical calculations, unlimited plan bypass, and circuit breakers:
+Run the full unit test suite covering single-init, auth restrictions, renewals, mathematical calculations, unlimited plan bypass, circuit breakers, persistent TTL bumps, and code upgrades:
 
 ```bash
 cargo test
 ```
 
-All 18 unit tests validate edge cases against `soroban-sdk` testutils and mock Stellar Asset Contracts.
+All 19 unit tests validate edge cases against `soroban-sdk` testutils and mock Stellar Asset Contracts.
 
 ---
 

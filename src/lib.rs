@@ -399,4 +399,19 @@ impl SolfaPayments {
 
         Ok(())
     }
+
+    /// Checks whether user is eligible to transcribe (active unlimited plan or credits > 0).
+    pub fn can_transcribe(env: Env, user: Address) -> bool {
+        if Self::is_unlimited_active(&env, &user) {
+            return true;
+        }
+
+        let credits: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Credits(user))
+            .unwrap_or(0);
+
+        credits > 0
+    }
 }

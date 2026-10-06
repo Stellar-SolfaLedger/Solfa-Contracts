@@ -80,4 +80,58 @@ pub mod test {
         assert_eq!(fixture.xlm_client.balance(&fixture.user), 1_000_000_000);
         assert_eq!(fixture.usdc_client.balance(&fixture.user), 1_000_000_000);
     }
+
+    #[test]
+    fn test_init_success() {
+        let fixture = TestFixture::setup();
+        let res = fixture
+            .client
+            .try_init(&fixture.admin, &fixture.treasury, &fixture.operator);
+        assert!(res.is_ok());
+        assert_eq!(fixture.client.is_paused(), false);
+    }
+
+    #[test]
+    fn test_init_cannot_reinitialize() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        let second_call = fixture
+            .client
+            .try_init(&fixture.admin, &fixture.treasury, &fixture.operator);
+        assert_eq!(
+            second_call.err(),
+            Some(Ok(ContractError::AlreadyInitialized))
+        );
+    }
+
+    #[test]
+    fn test_admin_update_operator_and_treasury() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        let new_operator = Address::generate(&fixture.env);
+        let new_treasury = Address::generate(&fixture.env);
+
+        assert!(fixture.client.try_set_operator(&new_operator).is_ok());
+        assert!(fixture.client.try_set_treasury(&new_treasury).is_ok());
+    }
+
+    #[test]
+    fn test_emergency_pause_toggle() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        assert_eq!(fixture.client.is_paused(), false);
+        fixture.client.set_pause(&true);
+        assert_eq!(fixture.client.is_paused(), true);
+        fixture.client.set_pause(&false);
+        assert_eq!(fixture.client.is_paused(), false);
+    }
 }

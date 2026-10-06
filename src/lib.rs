@@ -180,4 +180,31 @@ impl SolfaPayments {
             .get(&DataKey::PlanList)
             .unwrap_or(Vec::new(&env))
     }
+
+    /// Sets the price for a plan in terms of a specific accepted token asset.
+    /// Requires admin authorization.
+    pub fn set_plan_price(
+        env: Env,
+        plan_id: u32,
+        token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        if Self::get_plan(env.clone(), plan_id).is_none() {
+            return Err(ContractError::PlanNotFound);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PlanPrice(plan_id, token.clone()), &amount);
+
+        Events::emit_plan_price_set(&env, plan_id, &token, amount);
+
+        Ok(())
+    }
 }

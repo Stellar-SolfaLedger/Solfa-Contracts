@@ -167,4 +167,9 @@ impl SolfaPayments {
 
         Ok(())
     }
+
+    /// Returns plan details if configured.
+    pub fn get_plan(env: Env, plan_id: u32) -> Option<Plan> {
+        env.storage().instance().get(&DataKey::Plan(plan_id))
+    }
 }

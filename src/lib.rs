@@ -94,4 +94,21 @@ impl SolfaPayments {
         Events::emit_treasury_updated(&env, &new_treasury);
         Ok(())
     }
+
+    /// Sets contract paused state for emergency circuit breaker.
+    /// Requires admin authorization.
+    pub fn set_pause(env: Env, paused: bool) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        Events::emit_pause_toggled(&env, paused);
+        Ok(())
+    }
+
+    /// Checks if contract operations are paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
 }

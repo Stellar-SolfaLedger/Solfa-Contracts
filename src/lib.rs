@@ -414,4 +414,17 @@ impl SolfaPayments {
 
         credits > 0
     }
+
+    /// Returns the current active or expired subscription record for a user.
+    pub fn get_subscription(env: Env, user: Address) -> Option<Subscription> {
+        env.storage().instance().get(&DataKey::Subscription(user))
+    }
+
+    /// Returns the available pay-per-use credits balance for a user.
+    pub fn get_credits(env: Env, user: Address) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::Credits(user))
+            .unwrap_or(0)
+    }
 }

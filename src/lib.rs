@@ -10,7 +10,12 @@ use errors::ContractError;
 use events::Events;
 use types::{DataKey, Plan, Subscription};
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, String, Vec};
+
+pub const INSTANCE_BUMP_AMOUNT: u32 = 518_400; // ~30 days in ledgers (at ~5s per ledger)
+pub const INSTANCE_LIFETIME_THRESHOLD: u32 = 120_960; // ~7 days in ledgers
+pub const PERSISTENT_BUMP_AMOUNT: u32 = 518_400;
+pub const PERSISTENT_LIFETIME_THRESHOLD: u32 = 120_960;
 
 #[contract]
 pub struct SolfaPayments;
@@ -55,10 +60,22 @@ impl SolfaPayments {
         Ok(())
     }
 
+    pub(crate) fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+    }
+
+    pub(crate) fn bump_persistent(env: &Env, key: &DataKey) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, PERSISTENT_LIFETIME_THRESHOLD, PERSISTENT_BUMP_AMOUNT);
+    }
+
     pub(crate) fn is_unlimited_active(env: &Env, user: &Address) -> bool {
         let sub: Option<Subscription> = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Subscription(user.clone()));
         if let Some(sub) = sub {
             let now = env.ledger().timestamp();
@@ -289,7 +306,7 @@ impl SolfaPayments {
         let now = env.ledger().timestamp();
         let existing_sub: Option<Subscription> = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Subscription(user.clone()));
 
         let base_time = match existing_sub {
@@ -302,22 +319,28 @@ impl SolfaPayments {
             plan_id,
             expires_at: new_expiry,
         };
+        let sub_key = DataKey::Subscription(user.clone());
         env.storage()
-            .instance()
-            .set(&DataKey::Subscription(user.clone()), &subscription);
+            .persistent()
+            .set(&sub_key, &subscription);
+        Self::bump_persistent(&env, &sub_key);
 
         // If plan is not unlimited, grant the plan's bundled credits
         if !plan.unlimited && plan.credits > 0 {
+            let credits_key = DataKey::Credits(user.clone());
             let current_credits: u32 = env
                 .storage()
-                .instance()
-                .get(&DataKey::Credits(user.clone()))
+                .persistent()
+                .get(&credits_key)
                 .unwrap_or(0);
-            env.storage().instance().set(
-                &DataKey::Credits(user.clone()),
+            env.storage().persistent().set(
+                &credits_key,
                 &(current_credits + plan.credits),
             );
+            Self::bump_persistent(&env, &credits_key);
         }
+
+        Self::bump_instance(&env);
 
         Events::emit_subscribed(&env, &user, plan_id, &token, price, new_expiry);
 
@@ -351,17 +374,20 @@ impl SolfaPayments {
         // Transfer token payment from user to treasury
         token::Client::new(&env, &token).transfer(&user, &treasury, &total_amount);
 
-        // Increment user's credit balance
+        // Increment user's credit balance in persistent storage
+        let credits_key = DataKey::Credits(user.clone());
         let current_credits: u32 = env
             .storage()
-            .instance()
-            .get(&DataKey::Credits(user.clone()))
+            .persistent()
+            .get(&credits_key)
             .unwrap_or(0);
 
         let new_credits = current_credits + count;
         env.storage()
-            .instance()
-            .set(&DataKey::Credits(user.clone()), &new_credits);
+            .persistent()
+            .set(&credits_key, &new_credits);
+        Self::bump_persistent(&env, &credits_key);
+        Self::bump_instance(&env);
 
         Events::emit_credits_purchased(&env, &user, &token, count, total_amount);
 
@@ -383,10 +409,11 @@ impl SolfaPayments {
 
         // If user has an active unlimited subscription, credits are unmetered
         if !Self::is_unlimited_active(&env, &user) {
+            let credits_key = DataKey::Credits(user.clone());
             let current_credits: u32 = env
                 .storage()
-                .instance()
-                .get(&DataKey::Credits(user.clone()))
+                .persistent()
+                .get(&credits_key)
                 .unwrap_or(0);
 
             if current_credits == 0 {
@@ -394,9 +421,12 @@ impl SolfaPayments {
             }
 
             env.storage()
-                .instance()
-                .set(&DataKey::Credits(user.clone()), &(current_credits - 1));
+                .persistent()
+                .set(&credits_key, &(current_credits - 1));
+            Self::bump_persistent(&env, &credits_key);
         }
+
+        Self::bump_instance(&env);
 
         Events::emit_credit_consumed(&env, &user, &job_id);
 
@@ -411,7 +441,7 @@ impl SolfaPayments {
 
         let credits: u32 = env
             .storage()
-            .instance()
+            .persistent()
             .get(&DataKey::Credits(user))
             .unwrap_or(0);
 
@@ -420,19 +450,26 @@ impl SolfaPayments {
 
     /// Returns the current active or expired subscription record for a user.
     pub fn get_subscription(env: Env, user: Address) -> Option<Subscription> {
-        env.storage().instance().get(&DataKey::Subscription(user))
+        let key = DataKey::Subscription(user);
+        let sub = env.storage().persistent().get(&key);
+        if sub.is_some() {
+            Self::bump_persistent(&env, &key);
+        }
+        sub
     }
 
     /// Returns the available pay-per-use credits balance for a user.
     pub fn get_credits(env: Env, user: Address) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::Credits(user))
-            .unwrap_or(0)
+        let key = DataKey::Credits(user);
+        let credits: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        if credits > 0 {
+            Self::bump_persistent(&env, &key);
+        }
+        credits
     }
 
     /// Refunds tokens from treasury to a designated user address.
-    /// Requires admin authorization.
+    /// NOTE: Requires BOTH Admin authorization AND Treasury authorization (multisig / two-party consent).
     pub fn refund(
         env: Env,
         to: Address,
@@ -452,6 +489,15 @@ impl SolfaPayments {
 
         Events::emit_refunded(&env, &to, &token, amount);
 
+        Ok(())
+    }
+
+    /// Upgrades the contract Wasm executable code to a new deployed Wasm hash.
+    /// Requires admin authorization.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        Events::emit_contract_upgraded(&env, &new_wasm_hash);
         Ok(())
     }
 }

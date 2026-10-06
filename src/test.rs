@@ -2,7 +2,6 @@
 pub mod test {
     use crate::{
         errors::ContractError,
-        types::{Plan, Subscription},
         SolfaPayments, SolfaPaymentsClient,
     };
     use soroban_sdk::{
@@ -591,5 +590,17 @@ pub mod test {
             .client
             .try_refund(&fixture.user, &fixture.xlm_token, &0);
         assert_eq!(invalid_refund.err(), Some(Ok(ContractError::InvalidAmount)));
+    }
+
+    #[test]
+    fn test_contract_upgrade_requires_admin() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        let dummy_hash = soroban_sdk::BytesN::from_array(&fixture.env, &[1u8; 32]);
+        let res = fixture.client.try_upgrade(&dummy_hash);
+        assert!(res.is_err());
     }
 }

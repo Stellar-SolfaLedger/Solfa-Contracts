@@ -77,4 +77,9 @@ impl Events {
         let topics = (symbol_short!("refund"), to.clone(), token.clone());
         env.events().publish(topics, amount);
     }
+
+    pub fn emit_contract_upgraded(env: &Env, new_wasm_hash: &soroban_sdk::BytesN<32>) {
+        let topics = (symbol_short!("upgrade"),);
+        env.events().publish(topics, new_wasm_hash.clone());
+    }
 }

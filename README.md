@@ -151,3 +151,6 @@ stellar contract invoke --id solfa --network testnet -- \
 2. **Dedicated Operator Key**: Never share or reuse the Operator key for Treasury or Administration. The backend only requires the operator key to execute `consume_credit`.
 3. **No Private Keys in Repositories**: All private keys (`S...` secret keys) must be loaded from HSM, cloud secret managers (AWS Secrets Manager / Vault), or encrypted environment variables.
 4. **Trustlines**: Ensure users have a trustline established to USDC or USDT prior to invoking `subscribe` or `buy_credits` with those assets.
+5. **Persistent Storage & TTL Archival**: User subscriptions and credit balances are stored in `env.storage().persistent()` to prevent unbounded growth of `instance()` storage (which has a strict 64 KB limit). Each read/write automatically bumps entry TTL by 518,400 ledgers (~30 days).
+6. **Refund Dual Authorization**: `refund(to, token, amount)` enforces dual-authorization requiring both `admin.require_auth()` and `treasury.require_auth()` to ensure funds cannot be unilaterally withdrawn without treasury consent.
+7. **Contract Upgradability**: Code upgrades can be executed via `upgrade(new_wasm_hash)` with Admin authorization, maintaining all persistent user credit and subscription state.

@@ -207,4 +207,11 @@ impl SolfaPayments {
 
         Ok(())
     }
+
+    /// Returns the price for a plan in terms of a specific token.
+    pub fn get_plan_price(env: Env, plan_id: u32, token: Address) -> Option<i128> {
+        env.storage()
+            .instance()
+            .get(&DataKey::PlanPrice(plan_id, token))
+    }
 }

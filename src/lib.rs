@@ -85,4 +85,13 @@ impl SolfaPayments {
         Events::emit_operator_updated(&env, &new_operator);
         Ok(())
     }
+
+    /// Updates the treasury address receiving fee payments.
+    /// Requires admin authorization.
+    pub fn set_treasury(env: Env, new_treasury: Address) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Treasury, &new_treasury);
+        Events::emit_treasury_updated(&env, &new_treasury);
+        Ok(())
+    }
 }

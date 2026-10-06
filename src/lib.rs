@@ -427,4 +427,28 @@ impl SolfaPayments {
             .get(&DataKey::Credits(user))
             .unwrap_or(0)
     }
+
+    /// Refunds tokens from treasury to a designated user address.
+    /// Requires admin authorization.
+    pub fn refund(
+        env: Env,
+        to: Address,
+        token: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        Self::require_admin(&env)?;
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidAmount);
+        }
+
+        let treasury = Self::get_treasury(&env)?;
+        treasury.require_auth();
+
+        token::Client::new(&env, &token).transfer(&treasury, &to, &amount);
+
+        Events::emit_refunded(&env, &to, &token, amount);
+
+        Ok(())
+    }
 }

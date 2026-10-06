@@ -1,5 +1,6 @@
 #![no_std]
 pub mod errors;
+pub mod events;
 pub mod types;
 
 use soroban_sdk::{contract, contractimpl, Env};

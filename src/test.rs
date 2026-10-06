@@ -134,4 +134,103 @@ pub mod test {
         fixture.client.set_pause(&false);
         assert_eq!(fixture.client.is_paused(), false);
     }
+
+    #[test]
+    fn test_plan_crud_and_listing() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        // Create plan 1: Monthly Basic (30 days, 20 credits)
+        let res = fixture
+            .client
+            .try_set_plan(&1, &2592000, &20, &false, &true);
+        assert!(res.is_ok());
+
+        // Create plan 2: Pro Unlimited (30 days, unlimited)
+        let res2 = fixture
+            .client
+            .try_set_plan(&2, &2592000, &0, &true, &true);
+        assert!(res2.is_ok());
+
+        // Inspect plan 1
+        let plan1 = fixture.client.get_plan(&1).unwrap();
+        assert_eq!(plan1.credits, 20);
+        assert_eq!(plan1.unlimited, false);
+        assert_eq!(plan1.active, true);
+
+        // Inspect plan 2
+        let plan2 = fixture.client.get_plan(&2).unwrap();
+        assert_eq!(plan2.unlimited, true);
+
+        // Check get_plans helper returns both IDs
+        let plans = fixture.client.get_plans();
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans.get(0).unwrap(), 1);
+        assert_eq!(plans.get(1).unwrap(), 2);
+
+        // Update plan 1 to inactive
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &false);
+        assert_eq!(fixture.client.get_plan(&1).unwrap().active, false);
+
+        // Invalid duration 0 fails
+        let err = fixture
+            .client
+            .try_set_plan(&3, &0, &10, &false, &true);
+        assert_eq!(err.err(), Some(Ok(ContractError::InvalidDuration)));
+    }
+
+    #[test]
+    fn test_pricing_configuration_and_validation() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        // Setup plan 1
+        fixture
+            .client
+            .set_plan(&1, &2592000, &20, &false, &true);
+
+        // Set plan prices for XLM and USDC
+        fixture
+            .client
+            .set_plan_price(&1, &fixture.xlm_token, &100_000_000);
+        fixture
+            .client
+            .set_plan_price(&1, &fixture.usdc_token, &50_000_000);
+
+        assert_eq!(
+            fixture.client.get_plan_price(&1, &fixture.xlm_token),
+            Some(100_000_000)
+        );
+        assert_eq!(
+            fixture.client.get_plan_price(&1, &fixture.usdc_token),
+            Some(50_000_000)
+        );
+
+        // Set credit price for XLM
+        fixture
+            .client
+            .set_credit_price(&fixture.xlm_token, &10_000_000);
+        assert_eq!(
+            fixture.client.get_credit_price(&fixture.xlm_token),
+            Some(10_000_000)
+        );
+
+        // Nonexistent plan price fails
+        let err = fixture
+            .client
+            .try_set_plan_price(&99, &fixture.xlm_token, &10_000_000);
+        assert_eq!(err.err(), Some(Ok(ContractError::PlanNotFound)));
+
+        // Non-positive amount fails
+        let err2 = fixture
+            .client
+            .try_set_plan_price(&1, &fixture.xlm_token, &0);
+        assert_eq!(err2.err(), Some(Ok(ContractError::InvalidAmount)));
+    }
 }

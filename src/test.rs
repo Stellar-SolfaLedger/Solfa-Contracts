@@ -401,4 +401,112 @@ pub mod test {
             .try_buy_credits(&fixture.user, &unpriced_token, &1);
         assert_eq!(buy_res.err(), Some(Ok(ContractError::PriceNotSet)));
     }
+
+    #[test]
+    fn test_consume_credit_success_and_decrement() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        fixture
+            .client
+            .set_credit_price(&fixture.xlm_token, &10_000_000);
+        fixture
+            .client
+            .buy_credits(&fixture.user, &fixture.xlm_token, &2);
+        assert_eq!(fixture.client.get_credits(&fixture.user), 2);
+
+        let job_id = String::from_str(&fixture.env, "job-101");
+        let res = fixture
+            .client
+            .try_consume_credit(&fixture.user, &job_id);
+        assert!(res.is_ok());
+        assert_eq!(fixture.client.get_credits(&fixture.user), 1);
+    }
+
+    #[test]
+    fn test_consume_credit_insufficient_credits() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        let job_id = String::from_str(&fixture.env, "job-102");
+        let res = fixture
+            .client
+            .try_consume_credit(&fixture.user, &job_id);
+        assert_eq!(res.err(), Some(Ok(ContractError::InsufficientCredits)));
+    }
+
+    #[test]
+    fn test_unlimited_plan_bypasses_credit_deduction() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        // Plan 2: Pro Unlimited
+        fixture
+            .client
+            .set_plan(&2, &2592000, &0, &true, &true);
+        fixture
+            .client
+            .set_plan_price(&2, &fixture.xlm_token, &200_000_000);
+
+        fixture
+            .client
+            .subscribe(&fixture.user, &2, &fixture.xlm_token);
+        assert_eq!(fixture.client.get_credits(&fixture.user), 0);
+
+        let job_id = String::from_str(&fixture.env, "job-unlimited");
+        let res = fixture
+            .client
+            .try_consume_credit(&fixture.user, &job_id);
+        assert!(res.is_ok());
+        // Credits still 0 (unmetered, no underflow)
+        assert_eq!(fixture.client.get_credits(&fixture.user), 0);
+    }
+
+    #[test]
+    fn test_can_transcribe_scenarios() {
+        let fixture = TestFixture::setup();
+        fixture
+            .client
+            .init(&fixture.admin, &fixture.treasury, &fixture.operator);
+
+        // New user has no credits/sub
+        assert_eq!(fixture.client.can_transcribe(&fixture.user), false);
+
+        // User buys credits
+        fixture
+            .client
+            .set_credit_price(&fixture.xlm_token, &10_000_000);
+        fixture
+            .client
+            .buy_credits(&fixture.user, &fixture.xlm_token, &1);
+        assert_eq!(fixture.client.can_transcribe(&fixture.user), true);
+
+        // Consume the credit
+        let job_id = String::from_str(&fixture.env, "job-1");
+        fixture.client.consume_credit(&fixture.user, &job_id);
+        assert_eq!(fixture.client.can_transcribe(&fixture.user), false);
+
+        // Subscribe to unlimited plan
+        fixture
+            .client
+            .set_plan(&2, &2592000, &0, &true, &true);
+        fixture
+            .client
+            .set_plan_price(&2, &fixture.xlm_token, &200_000_000);
+        fixture.env.ledger().set_timestamp(1000);
+        fixture
+            .client
+            .subscribe(&fixture.user, &2, &fixture.xlm_token);
+        assert_eq!(fixture.client.can_transcribe(&fixture.user), true);
+
+        // Fast forward ledger past expiry
+        fixture.env.ledger().set_timestamp(10_000_000);
+        assert_eq!(fixture.client.can_transcribe(&fixture.user), false);
+    }
 }
